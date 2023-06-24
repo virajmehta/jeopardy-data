@@ -3,8 +3,10 @@ import json
 import os
 import openai
 import logging
+from tqdm import tqdm
 from pathlib import Path
 from time import sleep
+from bloom_filter2 import BloomFilter
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +50,16 @@ def get_chat_completion(system_message, user_message):
     return completion.choices[0].message.content, completion.usage.total_tokens
 
 
+def clean(answer):
+    if answer.lower().startswith("who is "):
+        answer = answer[7:]
+    if answer.lower().startswith("what is "):
+        answer = answer[8:]
+    if answer.endswith('.'):
+        answer = answer[:-1]
+    return answer
+
+
 def main():
     with open(data_path, 'r') as f:
         data = json.load(f)
@@ -56,12 +68,15 @@ def main():
             out_data = json.load(f)
     else:
         out_data = []
-    clues_done = set([clue['question'] for clue in out_data])
+    clues_done = BloomFilter(max_elements=300000, error_rate=0.01)
+    for clue in out_data:
+        clues_done += clue['question']
     total_tokens = 0
     num_clues = 0
-    for i in range(100):
+    for i, clue in tqdm(enumerate(data), total=len(data)):
         clue = data[i]
-        if 'href' in clue or clue in clues_done:
+        question = clue['question']
+        if 'href' in question or question in clues_done:
             continue
         user_prompt = make_user_prompt(clue)
         wrong_answer, toks = get_chat_completion(system_prompt, user_prompt)
@@ -71,14 +86,15 @@ def main():
             wrong_answer, toks = get_chat_completion(system_prompt, user_prompt)
             total_tokens += toks
         new_clue = clue.copy()
-        new_clue['wrong_answer'] = wrong_answer
-        print(new_clue)
+        new_clue['wrong_answer'] = clean(wrong_answer)
         out_data.append(new_clue)
-        clues_done.add(new_clue['question'])
+        clues_done += question
         num_clues += 1
         if i % 100 == 0:
-            print(f'Total tokens: {total_tokens}')
-            print(f"Tokens per question: {total_tokens/num_clues}")
+            tqdm.write('saving...')
+            tqdm.write(str(new_clue))
+            tqdm.write(f'Total tokens: {total_tokens}')
+            tqdm.write(f"Tokens per question: {total_tokens/num_clues}")
             with open(out_data_path, 'w') as f:
                 json.dump(out_data, f)
     print(f'Total tokens: {total_tokens}')
