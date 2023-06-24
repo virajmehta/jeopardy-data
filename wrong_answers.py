@@ -57,6 +57,8 @@ def clean(answer):
         answer = answer[8:]
     if answer.endswith('.'):
         answer = answer[:-1]
+    if answer.endswith('?'):
+        answer = answer[:-1]
     return answer
 
 
